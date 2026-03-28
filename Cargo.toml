@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli", "gui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["CrossPost-Rust"]
+license = "MIT"
+
+[workspace.dependencies]
+crosspost-core = { path = "core" }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }

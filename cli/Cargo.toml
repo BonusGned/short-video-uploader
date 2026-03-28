@@ -1,0 +1,11 @@
+[package]
+name = "crosspost-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crosspost-core.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
+indicatif = "0.17"

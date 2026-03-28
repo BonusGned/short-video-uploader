@@ -1,0 +1,11 @@
+[package]
+name = "crosspost-gui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crosspost-core.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+eframe = "0.31"
+rfd = "0.15"
