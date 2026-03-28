@@ -5,10 +5,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-use crosspost_core::adapter::mock_uploader::MockUploader;
+use crosspost_core::adapter::{self, oauth};
 use crosspost_core::config::manager::ConfigManager;
 use crosspost_core::domain::model::{Platform, ThemePreference, UploadStatus, VideoMetadata};
-use crosspost_core::domain::port::AsyncUploader;
 use crosspost_core::service::upload_orchestrator::UploadOrchestrator;
 use crosspost_core::validation::VideoValidator;
 
@@ -37,8 +36,8 @@ enum Commands {
         #[arg(long)]
         thumbnail: Option<String>,
 
-        #[arg(short, long, value_delimiter = ',', default_value = "youtube,instagram,tiktok,vk")]
-        platforms: Vec<PlatformArg>,
+        #[arg(short, long, value_delimiter = ',')]
+        platforms: Option<Vec<PlatformArg>>,
     },
     Validate {
         #[arg(short, long)]
@@ -47,9 +46,26 @@ enum Commands {
         #[arg(short, long, value_delimiter = ',', default_value = "youtube,instagram,tiktok,vk")]
         platforms: Vec<PlatformArg>,
     },
+    Auth {
+        #[command(subcommand)]
+        action: AuthAction,
+    },
     Config {
         #[command(subcommand)]
         action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuthAction {
+    Login {
+        #[arg(short, long)]
+        platform: PlatformArg,
+    },
+    Status,
+    Logout {
+        #[arg(short, long)]
+        platform: PlatformArg,
     },
 }
 
@@ -90,6 +106,7 @@ impl From<PlatformArg> for Platform {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let cli = Cli::parse();
 
     match cli.command {
@@ -101,10 +118,24 @@ async fn main() -> Result<()> {
             thumbnail,
             platforms,
         } => {
+            let config_manager = ConfigManager::new()?;
             let metadata = build_metadata(video, title, description, tags, thumbnail);
-            let target_platforms: Vec<Platform> = platforms.into_iter().map(Into::into).collect();
 
-            run_upload(metadata, target_platforms).await?;
+            let uploaders = if let Some(plats) = platforms {
+                let target: Vec<Platform> = plats.into_iter().map(Into::into).collect();
+                let all = adapter::create_uploaders(config_manager.config());
+                all.into_iter()
+                    .filter(|u| target.contains(&u.platform()))
+                    .collect()
+            } else {
+                adapter::create_uploaders(config_manager.config())
+            };
+
+            if uploaders.is_empty() {
+                anyhow::bail!("No uploaders available. Configure credentials first.");
+            }
+
+            run_upload(metadata, uploaders).await?;
         }
         Commands::Validate { video, platforms } => {
             let metadata = VideoMetadata::new("validation-check", video.into());
@@ -121,6 +152,9 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Commands::Auth { action } => {
+            handle_auth(action).await?;
         }
         Commands::Config { action } => {
             handle_config(action)?;
@@ -150,19 +184,18 @@ fn build_metadata(
     meta
 }
 
-async fn run_upload(metadata: VideoMetadata, platforms: Vec<Platform>) -> Result<()> {
-    let uploaders: Vec<Arc<dyn AsyncUploader>> = platforms
-        .iter()
-        .map(|&p| Arc::new(MockUploader::new(p).with_delay(2000)) as Arc<dyn AsyncUploader>)
-        .collect();
-
+async fn run_upload(
+    metadata: VideoMetadata,
+    uploaders: Vec<Arc<dyn crosspost_core::domain::port::AsyncUploader>>,
+) -> Result<()> {
+    let platforms: Vec<Platform> = uploaders.iter().map(|u| u.platform()).collect();
     let orchestrator = UploadOrchestrator::new(uploaders);
 
     println!("Authenticating...");
     let auth_results = orchestrator.authenticate_all().await;
     for (platform, result) in &auth_results {
         match result {
-            Ok(()) => println!("  [{platform}] Authenticated"),
+            Ok(()) => println!("  [{platform}] OK"),
             Err(e) => println!("  [{platform}] Auth failed: {e}"),
         }
     }
@@ -213,14 +246,57 @@ async fn run_upload(metadata: VideoMetadata, platforms: Vec<Platform>) -> Result
     Ok(())
 }
 
+async fn handle_auth(action: AuthAction) -> Result<()> {
+    let config_manager = ConfigManager::new()?;
+
+    match action {
+        AuthAction::Login { platform } => {
+            let plat: Platform = platform.into();
+            let uploaders = adapter::create_uploaders(config_manager.config());
+            let uploader = uploaders
+                .iter()
+                .find(|u| u.platform() == plat)
+                .ok_or_else(|| anyhow::anyhow!("{plat} not configured. Add credentials to config first."))?;
+
+            println!("Opening browser for {plat} authorization...");
+            uploader.authenticate().await?;
+            println!("{plat} authenticated successfully!");
+        }
+        AuthAction::Status => {
+            for platform in Platform::ALL {
+                let token = oauth::load_token(platform);
+                let status = match token {
+                    Ok(Some(t)) if !t.is_expired() => "authenticated",
+                    Ok(Some(_)) => "expired (will auto-refresh)",
+                    Ok(None) => "not authenticated",
+                    Err(_) => "error reading token",
+                };
+                println!("  [{platform}] {status}");
+            }
+        }
+        AuthAction::Logout { platform } => {
+            let plat: Platform = platform.into();
+            crosspost_core::adapter::keyring_store::KeyringStore::delete_token(plat)?;
+            println!("{plat} token removed.");
+        }
+    }
+
+    Ok(())
+}
+
 fn handle_config(action: ConfigAction) -> Result<()> {
     let mut config_manager = ConfigManager::new()?;
     match action {
         ConfigAction::Show => {
             let config = config_manager.config();
             println!("Theme: {}", config.theme);
-            println!("Default title: {:?}", config.default_title);
             println!("Enabled platforms: {:?}", config.enabled_platforms);
+            println!();
+            println!("YouTube: {}", if config.youtube.is_configured() { "configured" } else { "not configured" });
+            println!("TikTok: {}", if config.tiktok.is_configured() { "configured" } else { "not configured" });
+            println!("Instagram: {}", if config.instagram.is_configured() { "configured" } else { "not configured" });
+            println!("VK: {}", if config.vk.is_configured() { "configured" } else { "not configured" });
+            println!();
             println!("Config path: {}", config_manager.config_file_path().display());
         }
         ConfigAction::SetTheme { theme } => {

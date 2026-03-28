@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crosspost_core::adapter::mock_uploader::MockUploader;
+use crosspost_core::adapter::{self, oauth};
 use crosspost_core::config::manager::ConfigManager;
 use crosspost_core::domain::model::{
     Platform, ThemePreference, UploadResult, UploadStatus, VideoMetadata,
@@ -84,6 +84,15 @@ struct CrossPostApp {
     progress: Arc<Mutex<HashMap<Platform, PlatformProgress>>>,
     validation_errors: Vec<String>,
     runtime: tokio::runtime::Runtime,
+    auth_status: HashMap<Platform, AuthState>,
+}
+
+#[derive(Clone, PartialEq)]
+enum AuthState {
+    NotConfigured,
+    NotAuthenticated,
+    Authenticated,
+    Expired,
 }
 
 impl CrossPostApp {
@@ -96,6 +105,8 @@ impl CrossPostApp {
             .build()
             .expect("Failed to create tokio runtime");
 
+        let auth_status = Self::check_auth_status(&config_manager);
+
         Self {
             config_manager,
             form: UploadForm::new(),
@@ -103,7 +114,40 @@ impl CrossPostApp {
             progress: Arc::new(Mutex::new(HashMap::new())),
             validation_errors: Vec::new(),
             runtime,
+            auth_status,
         }
+    }
+
+    fn check_auth_status(config_manager: &ConfigManager) -> HashMap<Platform, AuthState> {
+        let config = config_manager.config();
+        let mut status = HashMap::new();
+
+        for platform in Platform::ALL {
+            let configured = match platform {
+                Platform::YouTube => config.youtube.is_configured(),
+                Platform::TikTok => config.tiktok.is_configured(),
+                Platform::Instagram => config.instagram.is_configured(),
+                Platform::VK => config.vk.is_configured(),
+            };
+
+            if !configured {
+                status.insert(platform, AuthState::NotConfigured);
+                continue;
+            }
+
+            let state = match oauth::load_token(platform) {
+                Ok(Some(t)) if !t.is_expired() => AuthState::Authenticated,
+                Ok(Some(_)) => AuthState::Expired,
+                _ => AuthState::NotAuthenticated,
+            };
+            status.insert(platform, state);
+        }
+
+        status
+    }
+
+    fn refresh_auth_status(&mut self) {
+        self.auth_status = Self::check_auth_status(&self.config_manager);
     }
 
     fn render_top_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -128,6 +172,65 @@ impl CrossPostApp {
                 }
                 ui.label("Theme:");
             });
+        });
+    }
+
+    fn render_auth_section(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Authentication").strong());
+            for platform in Platform::ALL {
+                let state = self
+                    .auth_status
+                    .get(&platform)
+                    .cloned()
+                    .unwrap_or(AuthState::NotConfigured);
+
+                ui.horizontal(|ui| {
+                    let (color, label) = match state {
+                        AuthState::Authenticated => {
+                            (egui::Color32::from_rgb(80, 200, 80), "Authenticated")
+                        }
+                        AuthState::Expired => {
+                            (egui::Color32::from_rgb(220, 180, 50), "Expired (auto-refresh)")
+                        }
+                        AuthState::NotAuthenticated => {
+                            (egui::Color32::from_rgb(220, 80, 80), "Not authenticated")
+                        }
+                        AuthState::NotConfigured => {
+                            (egui::Color32::from_rgb(150, 150, 150), "Not configured")
+                        }
+                    };
+
+                    ui.label(format!("{platform}:"));
+                    ui.colored_label(color, label);
+
+                    if (state == AuthState::NotAuthenticated || state == AuthState::Expired)
+                        && ui.small_button("Login").clicked()
+                    {
+                        self.start_auth(platform, ui.ctx());
+                    }
+                    if state == AuthState::Authenticated
+                        && ui.small_button("Logout").clicked()
+                    {
+                        let _ = crosspost_core::adapter::keyring_store::KeyringStore::delete_token(platform);
+                        self.refresh_auth_status();
+                    }
+                });
+            }
+        });
+    }
+
+    fn start_auth(&mut self, platform: Platform, ctx: &egui::Context) {
+        let uploaders = adapter::create_uploaders(self.config_manager.config());
+        let uploader = uploaders.into_iter().find(|u| u.platform() == platform);
+
+        let Some(uploader) = uploader else { return };
+
+        let ctx = ctx.clone();
+        self.runtime.spawn(async move {
+            let result = uploader.authenticate().await;
+            AUTH_RESULT.lock().unwrap().replace((platform, result.is_ok()));
+            ctx.request_repaint();
         });
     }
 
@@ -185,9 +288,7 @@ impl CrossPostApp {
                 ui.text_edit_singleline(&mut self.form.title);
             });
 
-            ui.horizontal(|ui| {
-                ui.label("Description:");
-            });
+            ui.label("Description:");
             ui.add(
                 egui::TextEdit::multiline(&mut self.form.description)
                     .desired_rows(3)
@@ -260,9 +361,6 @@ impl CrossPostApp {
                     }
                 }
             }
-            if ui.button("New Upload").clicked() {
-                // handled in update()
-            }
         });
     }
 
@@ -310,9 +408,10 @@ impl CrossPostApp {
         self.state = AppState::Uploading;
         self.progress.lock().unwrap().clear();
 
-        let uploaders: Vec<Arc<dyn AsyncUploader>> = platforms
-            .iter()
-            .map(|&p| Arc::new(MockUploader::new(p).with_delay(3000)) as Arc<dyn AsyncUploader>)
+        let all_uploaders = adapter::create_uploaders(self.config_manager.config());
+        let uploaders: Vec<Arc<dyn AsyncUploader>> = all_uploaders
+            .into_iter()
+            .filter(|u| platforms.contains(&u.platform()))
             .collect();
 
         let orchestrator = UploadOrchestrator::new(uploaders);
@@ -349,11 +448,16 @@ impl CrossPostApp {
 }
 
 static UPLOAD_RESULTS: Mutex<Option<Vec<UploadResult>>> = Mutex::new(None);
+static AUTH_RESULT: Mutex<Option<(Platform, bool)>> = Mutex::new(None);
 
 impl eframe::App for CrossPostApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(results) = UPLOAD_RESULTS.lock().unwrap().take() {
             self.state = AppState::Done(results);
+        }
+
+        if let Some((_platform, _success)) = AUTH_RESULT.lock().unwrap().take() {
+            self.refresh_auth_status();
         }
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -364,6 +468,8 @@ impl eframe::App for CrossPostApp {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 match &self.state {
                     AppState::Idle => {
+                        self.render_auth_section(ui);
+                        ui.add_space(8.0);
                         self.render_file_section(ui);
                         ui.add_space(8.0);
                         self.render_metadata_section(ui);
@@ -392,6 +498,7 @@ impl eframe::App for CrossPostApp {
                     AppState::Done(results) => {
                         let results_clone = results.clone();
                         self.render_results(ui, &results_clone);
+                        ui.add_space(8.0);
                         if ui.button("New Upload").clicked() {
                             self.state = AppState::Idle;
                             self.progress.lock().unwrap().clear();
@@ -416,8 +523,10 @@ fn apply_theme(ctx: &egui::Context, pref: ThemePreference) {
 }
 
 fn main() -> eframe::Result {
+    env_logger::init();
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 650.0]),
         ..Default::default()
     };
 

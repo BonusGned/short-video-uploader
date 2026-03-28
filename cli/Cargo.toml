@@ -9,3 +9,4 @@ tokio.workspace = true
 anyhow.workspace = true
 clap = { version = "4", features = ["derive"] }
 indicatif = "0.17"
+env_logger = "0.11"
