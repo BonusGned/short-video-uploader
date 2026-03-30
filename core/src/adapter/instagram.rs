@@ -4,9 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::adapter::oauth::{
-    self, OAuthConfig, OAuthToken, ensure_valid_token, exchange_code, run_auth_flow, save_token,
-};
+use crate::adapter::oauth::{self, OAuthConfig, OAuthToken, ensure_valid_token, perform_full_auth};
 use crate::domain::model::{Platform, UploadResult, VideoMetadata};
 use crate::domain::port::{AsyncUploader, ProgressCallback, UploadProgress};
 use crate::error::{CoreError, Result};
@@ -19,12 +17,14 @@ const REDIRECT_PORT: u16 = 8587;
 pub struct InstagramUploader {
     oauth_config: OAuthConfig,
     ig_user_id: String,
+    client: reqwest::Client,
     authenticated: AtomicBool,
 }
 
 impl InstagramUploader {
     pub fn new(client_id: String, client_secret: String, ig_user_id: String) -> Self {
         let oauth_config = OAuthConfig {
+            platform: Platform::Instagram,
             client_id,
             client_secret,
             auth_url: FB_AUTH_URL.into(),
@@ -47,12 +47,13 @@ impl InstagramUploader {
         Self {
             oauth_config,
             ig_user_id,
+            client: reqwest::Client::new(),
             authenticated: AtomicBool::new(authenticated),
         }
     }
 
     async fn get_token(&self) -> Result<OAuthToken> {
-        ensure_valid_token(Platform::Instagram, &self.oauth_config).await
+        ensure_valid_token(&self.oauth_config).await
     }
 
     async fn create_container(
@@ -62,7 +63,6 @@ impl InstagramUploader {
     ) -> Result<String> {
         let video_url = format!("file://{}", metadata.video_path.display());
 
-        let client = reqwest::Client::new();
         let mut params = HashMap::new();
         params.insert("media_type", "REELS".to_string());
         params.insert("video_url", video_url);
@@ -70,7 +70,7 @@ impl InstagramUploader {
         params.insert("access_token", token.access_token.clone());
 
         let url = format!("{GRAPH_API}/{}/media", self.ig_user_id);
-        let resp = client
+        let resp = self.client
             .post(&url)
             .form(&params)
             .send()
@@ -101,7 +101,6 @@ impl InstagramUploader {
     }
 
     async fn wait_for_container(&self, token: &OAuthToken, container_id: &str) -> Result<()> {
-        let client = reqwest::Client::new();
         let url = format!(
             "{GRAPH_API}/{container_id}?fields=status_code&access_token={}",
             token.access_token
@@ -110,7 +109,7 @@ impl InstagramUploader {
         for _ in 0..30 {
             tokio::time::sleep(Duration::from_secs(2)).await;
 
-            let resp = client.get(&url).send().await.map_err(|e| CoreError::Upload {
+            let resp = self.client.get(&url).send().await.map_err(|e| CoreError::Upload {
                 platform: Platform::Instagram,
                 reason: format!("Status check failed: {e}"),
             })?;
@@ -141,7 +140,6 @@ impl InstagramUploader {
         token: &OAuthToken,
         container_id: &str,
     ) -> Result<String> {
-        let client = reqwest::Client::new();
         let url = format!("{GRAPH_API}/{}/media_publish", self.ig_user_id);
 
         let params = [
@@ -149,7 +147,7 @@ impl InstagramUploader {
             ("access_token", &token.access_token),
         ];
 
-        let resp = client
+        let resp = self.client
             .post(&url)
             .form(&params)
             .send()
@@ -171,9 +169,7 @@ impl InstagramUploader {
 
         let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
         let media_id = json["id"].as_str().unwrap_or("unknown");
-        Ok(format!(
-            "https://www.instagram.com/reel/{media_id}/"
-        ))
+        Ok(format!("https://www.instagram.com/reel/{media_id}/"))
     }
 }
 
@@ -184,19 +180,7 @@ impl AsyncUploader for InstagramUploader {
     }
 
     async fn authenticate(&self) -> Result<()> {
-        let code_result = run_auth_flow(&self.oauth_config)?;
-        let (code, verifier) = if code_result.contains('|') {
-            let mut parts = code_result.splitn(2, '|');
-            (
-                parts.next().unwrap().to_string(),
-                Some(parts.next().unwrap().to_string()),
-            )
-        } else {
-            (code_result, None)
-        };
-
-        let token = exchange_code(&self.oauth_config, &code, verifier.as_deref()).await?;
-        save_token(Platform::Instagram, &token)?;
+        perform_full_auth(&self.oauth_config).await?;
         self.authenticated.store(true, Ordering::SeqCst);
         Ok(())
     }

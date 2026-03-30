@@ -21,10 +21,10 @@ impl VideoValidator {
     pub fn validate_or_fail(metadata: &VideoMetadata, platforms: &[Platform]) -> Result<()> {
         let reports = Self::validate(metadata, platforms);
         for report in &reports {
-            if let Some(err) = report.errors.first() {
+            if !report.errors.is_empty() {
                 return Err(CoreError::Validation {
                     platform: report.platform,
-                    reason: err.clone(),
+                    reason: report.errors.join("; "),
                 });
             }
         }
@@ -75,7 +75,7 @@ impl VideoValidator {
             return Err(format!("[{platform}] File has no extension"));
         }
 
-        if !constraints.supported_formats.contains(&ext) {
+        if !constraints.supported_formats.contains(&ext.as_str()) {
             return Err(format!(
                 "[{platform}] Unsupported format '.{ext}'. Supported: {}",
                 constraints.supported_formats.join(", ")
@@ -116,5 +116,121 @@ pub struct ValidationReport {
 impl ValidationReport {
     pub fn is_valid(&self) -> bool {
         self.errors.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use tempfile::NamedTempFile;
+
+    fn temp_video(ext: &str) -> NamedTempFile {
+        let mut f = tempfile::Builder::new()
+            .suffix(&format!(".{ext}"))
+            .tempfile()
+            .unwrap();
+        f.write_all(&[0u8; 1024]).unwrap();
+        f
+    }
+
+    #[test]
+    fn valid_mp4_passes_all_platforms() {
+        let f = temp_video("mp4");
+        let meta = VideoMetadata::new("Test", f.path().to_path_buf());
+        let reports = VideoValidator::validate(&meta, &Platform::ALL);
+        for r in &reports {
+            assert!(r.is_valid(), "{}: {:?}", r.platform, r.errors);
+        }
+    }
+
+    #[test]
+    fn missing_file_reports_error() {
+        let meta = VideoMetadata::new("Test", PathBuf::from("/nonexistent/video.mp4"));
+        let reports = VideoValidator::validate(&meta, &[Platform::YouTube]);
+        assert!(!reports[0].is_valid());
+        assert!(reports[0].errors[0].contains("File not found"));
+    }
+
+    #[test]
+    fn unsupported_format_reports_error() {
+        let f = temp_video("flv");
+        let meta = VideoMetadata::new("Test", f.path().to_path_buf());
+        let reports = VideoValidator::validate(&meta, &[Platform::YouTube]);
+        assert!(!reports[0].is_valid());
+        assert!(reports[0].errors[0].contains("Unsupported format"));
+    }
+
+    #[test]
+    fn no_extension_reports_error() {
+        let f = tempfile::Builder::new()
+            .suffix("")
+            .tempfile()
+            .unwrap();
+        let meta = VideoMetadata::new("Test", f.path().to_path_buf());
+        let reports = VideoValidator::validate(&meta, &[Platform::YouTube]);
+        assert!(!reports[0].is_valid());
+        assert!(reports[0].errors[0].contains("no extension"));
+    }
+
+    #[test]
+    fn missing_thumbnail_reports_error() {
+        let f = temp_video("mp4");
+        let meta = VideoMetadata::new("Test", f.path().to_path_buf())
+            .with_thumbnail(PathBuf::from("/nonexistent/thumb.jpg"));
+        let reports = VideoValidator::validate(&meta, &[Platform::YouTube]);
+        assert!(!reports[0].is_valid());
+        assert!(reports[0].errors[0].contains("Thumbnail not found"));
+    }
+
+    #[test]
+    fn existing_thumbnail_passes() {
+        let f = temp_video("mp4");
+        let thumb = temp_video("jpg");
+        let meta = VideoMetadata::new("Test", f.path().to_path_buf())
+            .with_thumbnail(thumb.path().to_path_buf());
+        let reports = VideoValidator::validate(&meta, &[Platform::YouTube]);
+        assert!(reports[0].is_valid());
+    }
+
+    #[test]
+    fn validate_or_fail_returns_err_on_invalid() {
+        let meta = VideoMetadata::new("Test", PathBuf::from("/nonexistent/video.mp4"));
+        let result = VideoValidator::validate_or_fail(&meta, &[Platform::YouTube]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_or_fail_returns_ok_on_valid() {
+        let f = temp_video("mp4");
+        let meta = VideoMetadata::new("Test", f.path().to_path_buf());
+        let result = VideoValidator::validate_or_fail(&meta, &[Platform::YouTube]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validates_against_multiple_platforms() {
+        let f = temp_video("avi");
+        let meta = VideoMetadata::new("Test", f.path().to_path_buf());
+        let reports = VideoValidator::validate(&meta, &[Platform::YouTube, Platform::VK]);
+        // avi is unsupported on YouTube but supported on VK
+        assert!(!reports[0].is_valid());
+        assert!(reports[1].is_valid());
+    }
+
+    #[test]
+    fn validation_report_is_valid_with_no_errors() {
+        let r = ValidationReport { platform: Platform::YouTube, errors: vec![] };
+        assert!(r.is_valid());
+    }
+
+    #[test]
+    fn validation_report_is_invalid_with_errors() {
+        let r = ValidationReport {
+            platform: Platform::YouTube,
+            errors: vec!["bad".into()],
+        };
+        assert!(!r.is_valid());
     }
 }

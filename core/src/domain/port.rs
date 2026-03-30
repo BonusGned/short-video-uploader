@@ -30,3 +30,38 @@ impl UploadProgress {
         (self.bytes_sent as f64 / self.total_bytes as f64) * 100.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percentage_at_50_percent() {
+        let p = UploadProgress { bytes_sent: 50, total_bytes: 100 };
+        assert!((p.percentage() - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn percentage_at_100_percent() {
+        let p = UploadProgress { bytes_sent: 100, total_bytes: 100 };
+        assert!((p.percentage() - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn percentage_at_zero_bytes_sent() {
+        let p = UploadProgress { bytes_sent: 0, total_bytes: 100 };
+        assert!((p.percentage()).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn percentage_with_zero_total_returns_zero() {
+        let p = UploadProgress { bytes_sent: 0, total_bytes: 0 };
+        assert!((p.percentage()).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn percentage_non_zero_sent_zero_total() {
+        let p = UploadProgress { bytes_sent: 50, total_bytes: 0 };
+        assert!((p.percentage()).abs() < f64::EPSILON);
+    }
+}

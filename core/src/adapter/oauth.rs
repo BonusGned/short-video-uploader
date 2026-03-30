@@ -33,6 +33,7 @@ impl OAuthToken {
 
 #[derive(Debug, Clone)]
 pub struct OAuthConfig {
+    pub platform: Platform,
     pub client_id: String,
     pub client_secret: String,
     pub auth_url: String,
@@ -47,6 +48,11 @@ impl OAuthConfig {
     pub fn redirect_uri(&self) -> String {
         format!("http://localhost:{}", self.redirect_port)
     }
+}
+
+pub struct AuthCodeResult {
+    pub code: String,
+    pub pkce_verifier: Option<String>,
 }
 
 pub struct PkceChallenge {
@@ -100,21 +106,21 @@ pub fn build_auth_url(config: &OAuthConfig, state: &str, pkce: Option<&PkceChall
     url.to_string()
 }
 
-pub fn wait_for_callback(port: u16, expected_state: &str) -> Result<String> {
+pub fn wait_for_callback(port: u16, expected_state: &str, platform: Platform) -> Result<String> {
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
         .map_err(|e| CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: format!("Failed to bind callback server: {e}"),
         })?;
 
     let (mut stream, _) = listener.accept().map_err(|e| CoreError::Auth {
-        platform: Platform::YouTube,
+        platform,
         reason: format!("Failed to accept callback: {e}"),
     })?;
 
     let mut buf = [0u8; 4096];
     let n = stream.read(&mut buf).map_err(|e| CoreError::Auth {
-        platform: Platform::YouTube,
+        platform,
         reason: format!("Failed to read callback: {e}"),
     })?;
 
@@ -135,7 +141,7 @@ pub fn wait_for_callback(port: u16, expected_state: &str) -> Result<String> {
 
     let callback_url = Url::parse(&format!("http://localhost:{port}{path}")).map_err(|_| {
         CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: "Invalid callback URL".into(),
         }
     })?;
@@ -144,7 +150,7 @@ pub fn wait_for_callback(port: u16, expected_state: &str) -> Result<String> {
 
     if let Some(error) = params.get("error") {
         return Err(CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: format!("OAuth error: {error}"),
         });
     }
@@ -152,7 +158,7 @@ pub fn wait_for_callback(port: u16, expected_state: &str) -> Result<String> {
     let state = params.get("state").map(|s| s.as_str()).unwrap_or("");
     if state != expected_state {
         return Err(CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: "State mismatch — possible CSRF attack".into(),
         });
     }
@@ -161,7 +167,7 @@ pub fn wait_for_callback(port: u16, expected_state: &str) -> Result<String> {
         .get("code")
         .cloned()
         .ok_or_else(|| CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: "No authorization code in callback".into(),
         })
 }
@@ -183,30 +189,31 @@ pub async fn exchange_code(
         params.insert("code_verifier", verifier.to_string());
     }
 
+    let platform = config.platform;
     let resp = client
         .post(&config.token_url)
         .form(&params)
         .send()
         .await
         .map_err(|e| CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: format!("Token exchange failed: {e}"),
         })?;
 
     let status = resp.status();
     let body = resp.text().await.map_err(|e| CoreError::Auth {
-        platform: Platform::YouTube,
+        platform,
         reason: format!("Failed to read token response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: format!("Token exchange returned {status}: {body}"),
         });
     }
 
-    parse_token_response(&body)
+    parse_token_response(&body, platform)
 }
 
 pub async fn refresh_token(config: &OAuthConfig, refresh_tok: &str) -> Result<OAuthToken> {
@@ -218,46 +225,47 @@ pub async fn refresh_token(config: &OAuthConfig, refresh_tok: &str) -> Result<OA
         ("client_secret", &config.client_secret),
     ];
 
+    let platform = config.platform;
     let resp = client
         .post(&config.token_url)
         .form(&params)
         .send()
         .await
         .map_err(|e| CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: format!("Token refresh failed: {e}"),
         })?;
 
     let status = resp.status();
     let body = resp.text().await.map_err(|e| CoreError::Auth {
-        platform: Platform::YouTube,
+        platform,
         reason: format!("Failed to read refresh response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: format!("Token refresh returned {status}: {body}"),
         });
     }
 
-    let mut token = parse_token_response(&body)?;
+    let mut token = parse_token_response(&body, platform)?;
     if token.refresh_token.is_none() {
         token.refresh_token = Some(refresh_tok.to_string());
     }
     Ok(token)
 }
 
-fn parse_token_response(body: &str) -> Result<OAuthToken> {
+fn parse_token_response(body: &str, platform: Platform) -> Result<OAuthToken> {
     let json: serde_json::Value = serde_json::from_str(body).map_err(|e| CoreError::Auth {
-        platform: Platform::YouTube,
+        platform,
         reason: format!("Invalid token JSON: {e}"),
     })?;
 
     let access_token = json["access_token"]
         .as_str()
         .ok_or_else(|| CoreError::Auth {
-            platform: Platform::YouTube,
+            platform,
             reason: "Missing access_token".into(),
         })?
         .to_string();
@@ -304,10 +312,8 @@ pub fn load_token(platform: Platform) -> Result<Option<OAuthToken>> {
     }
 }
 
-pub async fn ensure_valid_token(
-    platform: Platform,
-    config: &OAuthConfig,
-) -> Result<OAuthToken> {
+pub async fn ensure_valid_token(config: &OAuthConfig) -> Result<OAuthToken> {
+    let platform = config.platform;
     let token = load_token(platform)?
         .ok_or_else(|| CoreError::Auth {
             platform,
@@ -330,7 +336,7 @@ pub async fn ensure_valid_token(
     }
 }
 
-pub fn run_auth_flow(config: &OAuthConfig) -> Result<String> {
+pub fn run_auth_flow(config: &OAuthConfig) -> Result<AuthCodeResult> {
     let state = generate_state();
     let pkce = if config.use_pkce {
         Some(generate_pkce())
@@ -342,14 +348,27 @@ pub fn run_auth_flow(config: &OAuthConfig) -> Result<String> {
     log::info!("Opening browser for authorization...");
     let _ = open::that(&auth_url);
 
-    wait_for_callback(config.redirect_port, &state)
-        .map(|code| {
-            log::info!("Received authorization code");
-            // Store PKCE verifier alongside code by returning "code|verifier"
-            if let Some(ref pkce) = pkce {
-                format!("{}|{}", code, pkce.verifier)
-            } else {
-                code
-            }
-        })
+    let code = wait_for_callback(config.redirect_port, &state, config.platform)?;
+    log::info!("Received authorization code");
+
+    Ok(AuthCodeResult {
+        code,
+        pkce_verifier: pkce.map(|p| p.verifier),
+    })
+}
+
+pub async fn perform_full_auth(config: &OAuthConfig) -> Result<OAuthToken> {
+    let config_for_blocking = config.clone();
+    let platform = config.platform;
+
+    let result = tokio::task::spawn_blocking(move || run_auth_flow(&config_for_blocking))
+        .await
+        .map_err(|e| CoreError::Auth {
+            platform,
+            reason: format!("Auth flow task failed: {e}"),
+        })??;
+
+    let token = exchange_code(config, &result.code, result.pkce_verifier.as_deref()).await?;
+    save_token(config.platform, &token)?;
+    Ok(token)
 }

@@ -57,3 +57,37 @@ fn create_uploader(platform: Platform, config: &AppConfig) -> Option<Arc<dyn Asy
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AppConfig;
+
+    #[test]
+    fn create_uploaders_defaults_to_mocks_for_all_platforms() {
+        let config = AppConfig::default();
+        let uploaders = create_uploaders(&config);
+        assert_eq!(uploaders.len(), 4);
+    }
+
+    #[test]
+    fn create_uploaders_with_configured_youtube() {
+        let mut config = AppConfig::default();
+        config.youtube.client_id = "yt_id".into();
+        config.youtube.client_secret = "yt_secret".into();
+        let uploaders = create_uploaders(&config);
+        assert_eq!(uploaders.len(), 4);
+        let yt = uploaders.iter().find(|u| u.platform() == Platform::YouTube).unwrap();
+        assert_eq!(yt.platform(), Platform::YouTube);
+    }
+
+    #[test]
+    fn create_uploaders_respects_enabled_platforms() {
+        let mut config = AppConfig::default();
+        config.enabled_platforms.clear();
+        config.enabled_platforms.insert(Platform::YouTube);
+        let uploaders = create_uploaders(&config);
+        assert_eq!(uploaders.len(), 1);
+        assert_eq!(uploaders[0].platform(), Platform::YouTube);
+    }
+}

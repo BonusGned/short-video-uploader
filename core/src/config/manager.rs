@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 
@@ -18,7 +18,10 @@ impl ConfigManager {
         let project_dirs = ProjectDirs::from("com", "CrossPost", "CrossPost-Rust")
             .ok_or_else(|| CoreError::Config("Unable to determine config directory".into()))?;
 
-        let config_dir = project_dirs.config_dir().to_path_buf();
+        Self::from_dir(project_dirs.config_dir().to_path_buf())
+    }
+
+    pub fn from_dir(config_dir: PathBuf) -> Result<Self> {
         fs::create_dir_all(&config_dir)?;
 
         let config_path = config_dir.join(CONFIG_FILE);
@@ -50,7 +53,7 @@ impl ConfigManager {
         Ok(())
     }
 
-    pub fn config_dir(&self) -> &PathBuf {
+    pub fn config_dir(&self) -> &Path {
         &self.config_dir
     }
 
@@ -64,5 +67,61 @@ impl ConfigManager {
     {
         f(&mut self.config);
         self.save()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::model::ThemePreference;
+
+    #[test]
+    fn creates_default_config_in_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ConfigManager::from_dir(dir.path().to_path_buf()).unwrap();
+
+        assert_eq!(mgr.config().theme, ThemePreference::System);
+        assert!(mgr.config_file_path().exists());
+    }
+
+    #[test]
+    fn loads_existing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let mut config = AppConfig::default();
+        config.theme = ThemePreference::Dark;
+        let content = toml::to_string_pretty(&config).unwrap();
+        fs::write(&config_path, content).unwrap();
+
+        let mgr = ConfigManager::from_dir(dir.path().to_path_buf()).unwrap();
+        assert_eq!(mgr.config().theme, ThemePreference::Dark);
+    }
+
+    #[test]
+    fn save_persists_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut mgr = ConfigManager::from_dir(dir.path().to_path_buf()).unwrap();
+        mgr.config_mut().theme = ThemePreference::Light;
+        mgr.save().unwrap();
+
+        let mgr2 = ConfigManager::from_dir(dir.path().to_path_buf()).unwrap();
+        assert_eq!(mgr2.config().theme, ThemePreference::Light);
+    }
+
+    #[test]
+    fn update_applies_closure_and_saves() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut mgr = ConfigManager::from_dir(dir.path().to_path_buf()).unwrap();
+        mgr.update(|c| c.default_title = "My Title".into()).unwrap();
+
+        let mgr2 = ConfigManager::from_dir(dir.path().to_path_buf()).unwrap();
+        assert_eq!(mgr2.config().default_title, "My Title");
+    }
+
+    #[test]
+    fn config_dir_returns_correct_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ConfigManager::from_dir(dir.path().to_path_buf()).unwrap();
+        assert_eq!(mgr.config_dir(), dir.path());
     }
 }

@@ -52,7 +52,8 @@ impl AsyncUploader for MockUploader {
         metadata: &VideoMetadata,
         on_progress: ProgressCallback,
     ) -> Result<UploadResult> {
-        let total_bytes = std::fs::metadata(&metadata.video_path)
+        let total_bytes = tokio::fs::metadata(&metadata.video_path)
+            .await
             .map(|m| m.len())
             .unwrap_or(1_000_000);
 
@@ -78,5 +79,70 @@ impl AsyncUploader for MockUploader {
 
     async fn is_authenticated(&self) -> bool {
         self.authenticated.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+    use crate::domain::model::UploadStatus;
+
+    fn temp_video() -> tempfile::NamedTempFile {
+        let mut f = tempfile::Builder::new()
+            .suffix(".mp4")
+            .tempfile()
+            .unwrap();
+        f.write_all(&[0u8; 4096]).unwrap();
+        f
+    }
+
+    #[test]
+    fn returns_correct_platform() {
+        let m = MockUploader::new(Platform::YouTube);
+        assert_eq!(m.platform(), Platform::YouTube);
+    }
+
+    #[test]
+    fn all_platforms_returns_four() {
+        let mocks = MockUploader::all_platforms();
+        assert_eq!(mocks.len(), 4);
+    }
+
+    #[test]
+    fn with_delay_sets_delay() {
+        let m = MockUploader::new(Platform::VK).with_delay(100);
+        assert_eq!(m.simulated_delay_ms, 100);
+    }
+
+    #[tokio::test]
+    async fn authenticate_sets_flag() {
+        let m = MockUploader::new(Platform::TikTok);
+        assert!(!m.is_authenticated().await);
+        m.authenticate().await.unwrap();
+        assert!(m.is_authenticated().await);
+    }
+
+    #[tokio::test]
+    async fn upload_returns_success_with_url() {
+        let f = temp_video();
+        let meta = VideoMetadata::new("My Video", f.path().to_path_buf());
+        let progress_count = Arc::new(AtomicU64::new(0));
+        let pc = Arc::clone(&progress_count);
+
+        let m = MockUploader::new(Platform::YouTube).with_delay(50);
+        let result = m
+            .upload(&meta, Box::new(move |_| { pc.fetch_add(1, Ordering::Relaxed); }))
+            .await
+            .unwrap();
+
+        assert!(result.is_success());
+        assert!(progress_count.load(Ordering::Relaxed) > 0);
+        if let UploadStatus::Success { url } = &result.status {
+            assert!(url.contains("youtube.mock"));
+            assert!(url.contains("my-video"));
+        }
     }
 }

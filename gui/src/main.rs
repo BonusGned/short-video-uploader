@@ -456,7 +456,7 @@ impl eframe::App for CrossPostApp {
             self.state = AppState::Done(results);
         }
 
-        if let Some((_platform, _success)) = AUTH_RESULT.lock().unwrap().take() {
+        if AUTH_RESULT.lock().unwrap().take().is_some() {
             self.refresh_auth_status();
         }
 

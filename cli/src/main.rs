@@ -247,10 +247,9 @@ async fn run_upload(
 }
 
 async fn handle_auth(action: AuthAction) -> Result<()> {
-    let config_manager = ConfigManager::new()?;
-
     match action {
         AuthAction::Login { platform } => {
+            let config_manager = ConfigManager::new()?;
             let plat: Platform = platform.into();
             let uploaders = adapter::create_uploaders(config_manager.config());
             let uploader = uploaders

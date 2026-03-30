@@ -22,3 +22,6 @@ log = "0.4"
 sha2 = "0.10"
 base64 = "0.22"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
+
+[dev-dependencies]
+tempfile = "3"

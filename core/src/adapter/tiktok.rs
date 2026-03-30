@@ -5,9 +5,7 @@ use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE};
 use tokio::io::AsyncReadExt;
 
-use crate::adapter::oauth::{
-    self, OAuthConfig, OAuthToken, ensure_valid_token, exchange_code, run_auth_flow, save_token,
-};
+use crate::adapter::oauth::{self, OAuthConfig, OAuthToken, ensure_valid_token, perform_full_auth};
 use crate::domain::model::{Platform, UploadResult, VideoMetadata};
 use crate::domain::port::{AsyncUploader, ProgressCallback, UploadProgress};
 use crate::error::{CoreError, Result};
@@ -19,20 +17,23 @@ const REDIRECT_PORT: u16 = 8586;
 
 pub struct TikTokUploader {
     oauth_config: OAuthConfig,
+    client: reqwest::Client,
     authenticated: AtomicBool,
 }
 
 impl TikTokUploader {
     pub fn new(client_id: String, client_secret: String) -> Self {
+        let extra_client_key = client_id.clone();
         let oauth_config = OAuthConfig {
-            client_id: client_id.clone(),
+            platform: Platform::TikTok,
+            client_id,
             client_secret,
             auth_url: TIKTOK_AUTH_URL.into(),
             token_url: TIKTOK_TOKEN_URL.into(),
             redirect_port: REDIRECT_PORT,
             scopes: vec!["video.upload".into(), "video.publish".into()],
             use_pkce: true,
-            extra_auth_params: HashMap::from([("client_key".into(), client_id)]),
+            extra_auth_params: HashMap::from([("client_key".into(), extra_client_key)]),
         };
 
         let authenticated = oauth::load_token(Platform::TikTok)
@@ -42,12 +43,13 @@ impl TikTokUploader {
 
         Self {
             oauth_config,
+            client: reqwest::Client::new(),
             authenticated: AtomicBool::new(authenticated),
         }
     }
 
     async fn get_token(&self) -> Result<OAuthToken> {
-        ensure_valid_token(Platform::TikTok, &self.oauth_config).await
+        ensure_valid_token(&self.oauth_config).await
     }
 
     async fn init_upload(&self, token: &OAuthToken, file_size: u64) -> Result<String> {
@@ -60,8 +62,7 @@ impl TikTokUploader {
             }
         });
 
-        let client = reqwest::Client::new();
-        let resp = client
+        let resp = self.client
             .post(TIKTOK_UPLOAD_INIT_URL)
             .header(AUTHORIZATION, format!("Bearer {}", token.access_token))
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
@@ -101,19 +102,7 @@ impl AsyncUploader for TikTokUploader {
     }
 
     async fn authenticate(&self) -> Result<()> {
-        let code_result = run_auth_flow(&self.oauth_config)?;
-        let (code, verifier) = if code_result.contains('|') {
-            let mut parts = code_result.splitn(2, '|');
-            (
-                parts.next().unwrap().to_string(),
-                Some(parts.next().unwrap().to_string()),
-            )
-        } else {
-            (code_result, None)
-        };
-
-        let token = exchange_code(&self.oauth_config, &code, verifier.as_deref()).await?;
-        save_token(Platform::TikTok, &token)?;
+        perform_full_auth(&self.oauth_config).await?;
         self.authenticated.store(true, Ordering::SeqCst);
         Ok(())
     }
@@ -133,6 +122,14 @@ impl AsyncUploader for TikTokUploader {
             })?;
 
         let total_bytes = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+
+        if total_bytes == 0 {
+            return Err(CoreError::Upload {
+                platform: Platform::TikTok,
+                reason: "Video file is empty".into(),
+            });
+        }
+
         let upload_url = self.init_upload(&token, total_bytes).await?;
 
         let mut buffer = Vec::with_capacity(total_bytes as usize);
@@ -146,10 +143,9 @@ impl AsyncUploader for TikTokUploader {
             total_bytes,
         });
 
-        let client = reqwest::Client::new();
         let content_range = format!("bytes 0-{}/{total_bytes}", total_bytes - 1);
 
-        let resp = client
+        let resp = self.client
             .put(&upload_url)
             .header(CONTENT_TYPE, "video/mp4")
             .header(CONTENT_LENGTH, total_bytes.to_string())
@@ -178,7 +174,7 @@ impl AsyncUploader for TikTokUploader {
 
         Ok(UploadResult::success(
             Platform::TikTok,
-            "https://www.tiktok.com (video pending review)".to_string(),
+            "https://www.tiktok.com (video pending review)",
         ))
     }
 
