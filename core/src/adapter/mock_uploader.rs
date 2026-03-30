@@ -28,10 +28,7 @@ impl MockUploader {
     }
 
     pub fn all_platforms() -> Vec<Self> {
-        Platform::ALL
-            .iter()
-            .map(|&p| Self::new(p))
-            .collect()
+        Platform::ALL.iter().map(|&p| Self::new(p)).collect()
     }
 }
 
@@ -85,16 +82,13 @@ impl AsyncUploader for MockUploader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::sync::atomic::AtomicU64;
-    use std::sync::Arc;
     use crate::domain::model::UploadStatus;
+    use std::io::Write;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     fn temp_video() -> tempfile::NamedTempFile {
-        let mut f = tempfile::Builder::new()
-            .suffix(".mp4")
-            .tempfile()
-            .unwrap();
+        let mut f = tempfile::Builder::new().suffix(".mp4").tempfile().unwrap();
         f.write_all(&[0u8; 4096]).unwrap();
         f
     }
@@ -134,7 +128,12 @@ mod tests {
 
         let m = MockUploader::new(Platform::YouTube).with_delay(50);
         let result = m
-            .upload(&meta, Box::new(move |_| { pc.fetch_add(1, Ordering::Relaxed); }))
+            .upload(
+                &meta,
+                Box::new(move |_| {
+                    pc.fetch_add(1, Ordering::Relaxed);
+                }),
+            )
             .await
             .unwrap();
 

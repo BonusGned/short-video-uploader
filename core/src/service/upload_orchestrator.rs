@@ -4,8 +4,8 @@ use tokio::task::JoinSet;
 
 use crate::domain::model::{Platform, UploadResult, VideoMetadata};
 use crate::domain::port::{AsyncUploader, ProgressCallback, UploadProgress};
-use crate::validation::VideoValidator;
 use crate::error::Result;
+use crate::validation::VideoValidator;
 
 pub struct UploadOrchestrator {
     uploaders: Vec<Arc<dyn AsyncUploader>>,
@@ -100,10 +100,7 @@ mod tests {
     }
 
     fn temp_video() -> tempfile::NamedTempFile {
-        let mut f = tempfile::Builder::new()
-            .suffix(".mp4")
-            .tempfile()
-            .unwrap();
+        let mut f = tempfile::Builder::new().suffix(".mp4").tempfile().unwrap();
         f.write_all(&[0u8; 2048]).unwrap();
         f
     }
@@ -131,7 +128,9 @@ mod tests {
         let pc = Arc::clone(&progress_calls);
 
         let results = orch
-            .upload_all(&meta, move |_, _| { pc.fetch_add(1, Ordering::Relaxed); })
+            .upload_all(&meta, move |_, _| {
+                pc.fetch_add(1, Ordering::Relaxed);
+            })
             .await
             .unwrap();
 
@@ -164,9 +163,9 @@ mod tests {
     async fn single_uploader_orchestrator() {
         let f = temp_video();
         let meta = VideoMetadata::new("Single", f.path().to_path_buf());
-        let uploaders: Vec<Arc<dyn AsyncUploader>> = vec![
-            Arc::new(MockUploader::new(Platform::YouTube).with_delay(50)),
-        ];
+        let uploaders: Vec<Arc<dyn AsyncUploader>> = vec![Arc::new(
+            MockUploader::new(Platform::YouTube).with_delay(50),
+        )];
         let orch = UploadOrchestrator::new(uploaders);
         let results = orch.upload_all(&meta, |_, _| {}).await.unwrap();
         assert_eq!(results.len(), 1);

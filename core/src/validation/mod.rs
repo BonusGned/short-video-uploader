@@ -90,9 +90,7 @@ impl VideoValidator {
         platform: Platform,
         constraints: &PlatformConstraints,
     ) -> std::result::Result<(), String> {
-        let file_size = fs::metadata(path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
         let max_bytes = constraints.max_file_size_mb * 1024 * 1024;
         if file_size > max_bytes {
@@ -164,10 +162,7 @@ mod tests {
 
     #[test]
     fn no_extension_reports_error() {
-        let f = tempfile::Builder::new()
-            .suffix("")
-            .tempfile()
-            .unwrap();
+        let f = tempfile::Builder::new().suffix("").tempfile().unwrap();
         let meta = VideoMetadata::new("Test", f.path().to_path_buf());
         let reports = VideoValidator::validate(&meta, &[Platform::YouTube]);
         assert!(!reports[0].is_valid());
@@ -221,7 +216,10 @@ mod tests {
 
     #[test]
     fn validation_report_is_valid_with_no_errors() {
-        let r = ValidationReport { platform: Platform::YouTube, errors: vec![] };
+        let r = ValidationReport {
+            platform: Platform::YouTube,
+            errors: vec![],
+        };
         assert!(r.is_valid());
     }
 

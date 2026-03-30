@@ -12,7 +12,8 @@ use crate::error::{CoreError, Result};
 
 const TIKTOK_AUTH_URL: &str = "https://www.tiktok.com/v2/auth/authorize/";
 const TIKTOK_TOKEN_URL: &str = "https://open.tiktokapis.com/v2/oauth/token/";
-const TIKTOK_UPLOAD_INIT_URL: &str = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/";
+const TIKTOK_UPLOAD_INIT_URL: &str =
+    "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/";
 const REDIRECT_PORT: u16 = 8586;
 
 pub struct TikTokUploader {
@@ -36,10 +37,7 @@ impl TikTokUploader {
             extra_auth_params: HashMap::from([("client_key".into(), extra_client_key)]),
         };
 
-        let authenticated = oauth::load_token(Platform::TikTok)
-            .ok()
-            .flatten()
-            .is_some();
+        let authenticated = oauth::load_token(Platform::TikTok).ok().flatten().is_some();
 
         Self {
             oauth_config,
@@ -62,7 +60,8 @@ impl TikTokUploader {
             }
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(TIKTOK_UPLOAD_INIT_URL)
             .header(AUTHORIZATION, format!("Bearer {}", token.access_token))
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
@@ -133,10 +132,12 @@ impl AsyncUploader for TikTokUploader {
         let upload_url = self.init_upload(&token, total_bytes).await?;
 
         let mut buffer = Vec::with_capacity(total_bytes as usize);
-        file.read_to_end(&mut buffer).await.map_err(|e| CoreError::Upload {
-            platform: Platform::TikTok,
-            reason: format!("Cannot read video: {e}"),
-        })?;
+        file.read_to_end(&mut buffer)
+            .await
+            .map_err(|e| CoreError::Upload {
+                platform: Platform::TikTok,
+                reason: format!("Cannot read video: {e}"),
+            })?;
 
         on_progress(UploadProgress {
             bytes_sent: 0,
@@ -145,7 +146,8 @@ impl AsyncUploader for TikTokUploader {
 
         let content_range = format!("bytes 0-{}/{total_bytes}", total_bytes - 1);
 
-        let resp = self.client
+        let resp = self
+            .client
             .put(&upload_url)
             .header(CONTENT_TYPE, "video/mp4")
             .header(CONTENT_LENGTH, total_bytes.to_string())

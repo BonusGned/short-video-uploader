@@ -44,9 +44,7 @@ pub struct InstagramCredentials {
 
 impl InstagramCredentials {
     pub fn is_configured(&self) -> bool {
-        !self.client_id.is_empty()
-            && !self.client_secret.is_empty()
-            && !self.ig_user_id.is_empty()
+        !self.client_id.is_empty() && !self.client_secret.is_empty() && !self.ig_user_id.is_empty()
     }
 }
 

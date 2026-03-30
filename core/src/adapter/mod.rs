@@ -26,31 +26,29 @@ pub fn create_uploaders(config: &AppConfig) -> Vec<Arc<dyn AsyncUploader>> {
 
 fn create_uploader(platform: Platform, config: &AppConfig) -> Option<Arc<dyn AsyncUploader>> {
     match platform {
-        Platform::YouTube if config.youtube.is_configured() => Some(Arc::new(
-            youtube::YouTubeUploader::new(
+        Platform::YouTube if config.youtube.is_configured() => {
+            Some(Arc::new(youtube::YouTubeUploader::new(
                 config.youtube.client_id.clone(),
                 config.youtube.client_secret.clone(),
-            ),
-        )),
-        Platform::TikTok if config.tiktok.is_configured() => Some(Arc::new(
-            tiktok::TikTokUploader::new(
+            )))
+        }
+        Platform::TikTok if config.tiktok.is_configured() => {
+            Some(Arc::new(tiktok::TikTokUploader::new(
                 config.tiktok.client_id.clone(),
                 config.tiktok.client_secret.clone(),
-            ),
-        )),
-        Platform::Instagram if config.instagram.is_configured() => Some(Arc::new(
-            instagram::InstagramUploader::new(
+            )))
+        }
+        Platform::Instagram if config.instagram.is_configured() => {
+            Some(Arc::new(instagram::InstagramUploader::new(
                 config.instagram.client_id.clone(),
                 config.instagram.client_secret.clone(),
                 config.instagram.ig_user_id.clone(),
-            ),
-        )),
-        Platform::VK if config.vk.is_configured() => Some(Arc::new(
-            vk::VKUploader::new(
-                config.vk.client_id.clone(),
-                config.vk.client_secret.clone(),
-            ),
-        )),
+            )))
+        }
+        Platform::VK if config.vk.is_configured() => Some(Arc::new(vk::VKUploader::new(
+            config.vk.client_id.clone(),
+            config.vk.client_secret.clone(),
+        ))),
         _ => {
             log::warn!("{platform} credentials not configured, using mock uploader");
             Some(Arc::new(mock_uploader::MockUploader::new(platform)))
@@ -77,7 +75,10 @@ mod tests {
         config.youtube.client_secret = "yt_secret".into();
         let uploaders = create_uploaders(&config);
         assert_eq!(uploaders.len(), 4);
-        let yt = uploaders.iter().find(|u| u.platform() == Platform::YouTube).unwrap();
+        let yt = uploaders
+            .iter()
+            .find(|u| u.platform() == Platform::YouTube)
+            .unwrap();
         assert_eq!(yt.platform(), Platform::YouTube);
     }
 

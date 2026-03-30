@@ -75,7 +75,8 @@ impl YouTubeUploader {
             }
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(YOUTUBE_UPLOAD_URL)
             .header(AUTHORIZATION, format!("Bearer {}", token.access_token))
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
@@ -133,26 +134,27 @@ impl AsyncUploader for YouTubeUploader {
                 reason: format!("Cannot open video: {e}"),
             })?;
 
-        let total_bytes = file
-            .metadata()
-            .await
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let total_bytes = file.metadata().await.map(|m| m.len()).unwrap_or(0);
 
-        let upload_url = self.initiate_resumable_upload(&token, metadata, total_bytes).await?;
+        let upload_url = self
+            .initiate_resumable_upload(&token, metadata, total_bytes)
+            .await?;
 
         let mut buffer = Vec::with_capacity(total_bytes as usize);
-        file.read_to_end(&mut buffer).await.map_err(|e| CoreError::Upload {
-            platform: Platform::YouTube,
-            reason: format!("Cannot read video: {e}"),
-        })?;
+        file.read_to_end(&mut buffer)
+            .await
+            .map_err(|e| CoreError::Upload {
+                platform: Platform::YouTube,
+                reason: format!("Cannot read video: {e}"),
+            })?;
 
         on_progress(UploadProgress {
             bytes_sent: 0,
             total_bytes,
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .put(&upload_url)
             .header(AUTHORIZATION, format!("Bearer {}", token.access_token))
             .header(CONTENT_TYPE, "video/*")

@@ -9,7 +9,11 @@ pub trait AsyncUploader: Send + Sync {
 
     async fn authenticate(&self) -> Result<()>;
 
-    async fn upload(&self, metadata: &VideoMetadata, on_progress: ProgressCallback) -> Result<UploadResult>;
+    async fn upload(
+        &self,
+        metadata: &VideoMetadata,
+        on_progress: ProgressCallback,
+    ) -> Result<UploadResult>;
 
     async fn is_authenticated(&self) -> bool;
 }
@@ -37,31 +41,46 @@ mod tests {
 
     #[test]
     fn percentage_at_50_percent() {
-        let p = UploadProgress { bytes_sent: 50, total_bytes: 100 };
+        let p = UploadProgress {
+            bytes_sent: 50,
+            total_bytes: 100,
+        };
         assert!((p.percentage() - 50.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn percentage_at_100_percent() {
-        let p = UploadProgress { bytes_sent: 100, total_bytes: 100 };
+        let p = UploadProgress {
+            bytes_sent: 100,
+            total_bytes: 100,
+        };
         assert!((p.percentage() - 100.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn percentage_at_zero_bytes_sent() {
-        let p = UploadProgress { bytes_sent: 0, total_bytes: 100 };
+        let p = UploadProgress {
+            bytes_sent: 0,
+            total_bytes: 100,
+        };
         assert!((p.percentage()).abs() < f64::EPSILON);
     }
 
     #[test]
     fn percentage_with_zero_total_returns_zero() {
-        let p = UploadProgress { bytes_sent: 0, total_bytes: 0 };
+        let p = UploadProgress {
+            bytes_sent: 0,
+            total_bytes: 0,
+        };
         assert!((p.percentage()).abs() < f64::EPSILON);
     }
 
     #[test]
     fn percentage_non_zero_sent_zero_total() {
-        let p = UploadProgress { bytes_sent: 50, total_bytes: 0 };
+        let p = UploadProgress {
+            bytes_sent: 50,
+            total_bytes: 0,
+        };
         assert!((p.percentage()).abs() < f64::EPSILON);
     }
 }

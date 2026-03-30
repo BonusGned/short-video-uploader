@@ -222,7 +222,9 @@ mod tests {
     fn upload_result_success_variant() {
         let r = UploadResult::success(Platform::YouTube, "https://yt.com/123");
         assert!(r.is_success());
-        assert!(matches!(r.status, UploadStatus::Success { ref url } if url == "https://yt.com/123"));
+        assert!(
+            matches!(r.status, UploadStatus::Success { ref url } if url == "https://yt.com/123")
+        );
     }
 
     #[test]
@@ -248,7 +250,10 @@ mod tests {
     fn platform_constraints_all_have_supported_formats() {
         for p in Platform::ALL {
             let c = PlatformConstraints::for_platform(p);
-            assert!(!c.supported_formats.is_empty(), "{p} has no supported formats");
+            assert!(
+                !c.supported_formats.is_empty(),
+                "{p} has no supported formats"
+            );
             assert!(c.max_file_size_mb > 0);
             assert!(c.max_duration_secs > 0);
             assert!(c.min_aspect_ratio < c.max_aspect_ratio);

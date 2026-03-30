@@ -107,11 +107,10 @@ pub fn build_auth_url(config: &OAuthConfig, state: &str, pkce: Option<&PkceChall
 }
 
 pub fn wait_for_callback(port: u16, expected_state: &str, platform: Platform) -> Result<String> {
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
-        .map_err(|e| CoreError::Auth {
-            platform,
-            reason: format!("Failed to bind callback server: {e}"),
-        })?;
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).map_err(|e| CoreError::Auth {
+        platform,
+        reason: format!("Failed to bind callback server: {e}"),
+    })?;
 
     let (mut stream, _) = listener.accept().map_err(|e| CoreError::Auth {
         platform,
@@ -139,12 +138,11 @@ pub fn wait_for_callback(port: u16, expected_state: &str, platform: Platform) ->
     );
     let _ = stream.write_all(response.as_bytes());
 
-    let callback_url = Url::parse(&format!("http://localhost:{port}{path}")).map_err(|_| {
-        CoreError::Auth {
+    let callback_url =
+        Url::parse(&format!("http://localhost:{port}{path}")).map_err(|_| CoreError::Auth {
             platform,
             reason: "Invalid callback URL".into(),
-        }
-    })?;
+        })?;
 
     let params: HashMap<String, String> = callback_url.query_pairs().into_owned().collect();
 
@@ -163,13 +161,10 @@ pub fn wait_for_callback(port: u16, expected_state: &str, platform: Platform) ->
         });
     }
 
-    params
-        .get("code")
-        .cloned()
-        .ok_or_else(|| CoreError::Auth {
-            platform,
-            reason: "No authorization code in callback".into(),
-        })
+    params.get("code").cloned().ok_or_else(|| CoreError::Auth {
+        platform,
+        reason: "No authorization code in callback".into(),
+    })
 }
 
 pub async fn exchange_code(
@@ -271,10 +266,7 @@ fn parse_token_response(body: &str, platform: Platform) -> Result<OAuthToken> {
         .to_string();
 
     let refresh_token = json["refresh_token"].as_str().map(|s| s.to_string());
-    let token_type = json["token_type"]
-        .as_str()
-        .unwrap_or("Bearer")
-        .to_string();
+    let token_type = json["token_type"].as_str().unwrap_or("Bearer").to_string();
     let scope = json["scope"].as_str().map(|s| s.to_string());
 
     let expires_at = json["expires_in"]
@@ -301,11 +293,10 @@ pub fn save_token(platform: Platform, token: &OAuthToken) -> Result<()> {
 pub fn load_token(platform: Platform) -> Result<Option<OAuthToken>> {
     match KeyringStore::get_token(platform)? {
         Some(json) => {
-            let token: OAuthToken =
-                serde_json::from_str(&json).map_err(|e| CoreError::Auth {
-                    platform,
-                    reason: format!("Failed to deserialize token: {e}"),
-                })?;
+            let token: OAuthToken = serde_json::from_str(&json).map_err(|e| CoreError::Auth {
+                platform,
+                reason: format!("Failed to deserialize token: {e}"),
+            })?;
             Ok(Some(token))
         }
         None => Ok(None),
@@ -314,11 +305,10 @@ pub fn load_token(platform: Platform) -> Result<Option<OAuthToken>> {
 
 pub async fn ensure_valid_token(config: &OAuthConfig) -> Result<OAuthToken> {
     let platform = config.platform;
-    let token = load_token(platform)?
-        .ok_or_else(|| CoreError::Auth {
-            platform,
-            reason: "Not authenticated. Run auth first.".into(),
-        })?;
+    let token = load_token(platform)?.ok_or_else(|| CoreError::Auth {
+        platform,
+        reason: "Not authenticated. Run auth first.".into(),
+    })?;
 
     if !token.is_expired() {
         return Ok(token);

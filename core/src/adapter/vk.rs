@@ -36,10 +36,7 @@ impl VKUploader {
             extra_auth_params: HashMap::from([("display".into(), "page".into())]),
         };
 
-        let authenticated = oauth::load_token(Platform::VK)
-            .ok()
-            .flatten()
-            .is_some();
+        let authenticated = oauth::load_token(Platform::VK).ok().flatten().is_some();
 
         Self {
             oauth_config,
@@ -67,7 +64,8 @@ impl VKUploader {
         ];
 
         let url = format!("{VK_API}/video.save");
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .form(&params)
             .send()
@@ -126,10 +124,12 @@ impl AsyncUploader for VKUploader {
 
         let total_bytes = file.metadata().await.map(|m| m.len()).unwrap_or(0);
         let mut buffer = Vec::with_capacity(total_bytes as usize);
-        file.read_to_end(&mut buffer).await.map_err(|e| CoreError::Upload {
-            platform: Platform::VK,
-            reason: format!("Cannot read video: {e}"),
-        })?;
+        file.read_to_end(&mut buffer)
+            .await
+            .map_err(|e| CoreError::Upload {
+                platform: Platform::VK,
+                reason: format!("Cannot read video: {e}"),
+            })?;
 
         on_progress(UploadProgress {
             bytes_sent: 0,
@@ -146,7 +146,8 @@ impl AsyncUploader for VKUploader {
         let part = multipart::Part::bytes(buffer).file_name(filename);
         let form = multipart::Form::new().part("video_file", part);
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&upload_url)
             .multipart(form)
             .send()

@@ -190,9 +190,10 @@ impl CrossPostApp {
                         AuthState::Authenticated => {
                             (egui::Color32::from_rgb(80, 200, 80), "Authenticated")
                         }
-                        AuthState::Expired => {
-                            (egui::Color32::from_rgb(220, 180, 50), "Expired (auto-refresh)")
-                        }
+                        AuthState::Expired => (
+                            egui::Color32::from_rgb(220, 180, 50),
+                            "Expired (auto-refresh)",
+                        ),
                         AuthState::NotAuthenticated => {
                             (egui::Color32::from_rgb(220, 80, 80), "Not authenticated")
                         }
@@ -209,10 +210,10 @@ impl CrossPostApp {
                     {
                         self.start_auth(platform, ui.ctx());
                     }
-                    if state == AuthState::Authenticated
-                        && ui.small_button("Logout").clicked()
-                    {
-                        let _ = crosspost_core::adapter::keyring_store::KeyringStore::delete_token(platform);
+                    if state == AuthState::Authenticated && ui.small_button("Logout").clicked() {
+                        let _ = crosspost_core::adapter::keyring_store::KeyringStore::delete_token(
+                            platform,
+                        );
                         self.refresh_auth_status();
                     }
                 });
@@ -229,7 +230,10 @@ impl CrossPostApp {
         let ctx = ctx.clone();
         self.runtime.spawn(async move {
             let result = uploader.authenticate().await;
-            AUTH_RESULT.lock().unwrap().replace((platform, result.is_ok()));
+            AUTH_RESULT
+                .lock()
+                .unwrap()
+                .replace((platform, result.is_ok()));
             ctx.request_repaint();
         });
     }
@@ -465,44 +469,42 @@ impl eframe::App for CrossPostApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                match &self.state {
-                    AppState::Idle => {
-                        self.render_auth_section(ui);
-                        ui.add_space(8.0);
-                        self.render_file_section(ui);
-                        ui.add_space(8.0);
-                        self.render_metadata_section(ui);
-                        ui.add_space(8.0);
-                        self.render_platform_section(ui);
-                        ui.add_space(8.0);
-                        self.render_validation_errors(ui);
-                        ui.add_space(8.0);
+            egui::ScrollArea::vertical().show(ui, |ui| match &self.state {
+                AppState::Idle => {
+                    self.render_auth_section(ui);
+                    ui.add_space(8.0);
+                    self.render_file_section(ui);
+                    ui.add_space(8.0);
+                    self.render_metadata_section(ui);
+                    ui.add_space(8.0);
+                    self.render_platform_section(ui);
+                    ui.add_space(8.0);
+                    self.render_validation_errors(ui);
+                    ui.add_space(8.0);
 
-                        let can_upload = self.form.video_path.is_some()
-                            && !self.form.title.trim().is_empty();
+                    let can_upload =
+                        self.form.video_path.is_some() && !self.form.title.trim().is_empty();
 
-                        if ui
-                            .add_enabled(can_upload, egui::Button::new("Upload"))
-                            .clicked()
-                        {
-                            self.start_upload(ctx);
-                        }
+                    if ui
+                        .add_enabled(can_upload, egui::Button::new("Upload"))
+                        .clicked()
+                    {
+                        self.start_upload(ctx);
                     }
-                    AppState::Uploading => {
-                        self.render_progress(ui);
-                        ui.add_space(8.0);
-                        ui.spinner();
-                        ui.label("Uploading to selected platforms...");
-                    }
-                    AppState::Done(results) => {
-                        let results_clone = results.clone();
-                        self.render_results(ui, &results_clone);
-                        ui.add_space(8.0);
-                        if ui.button("New Upload").clicked() {
-                            self.state = AppState::Idle;
-                            self.progress.lock().unwrap().clear();
-                        }
+                }
+                AppState::Uploading => {
+                    self.render_progress(ui);
+                    ui.add_space(8.0);
+                    ui.spinner();
+                    ui.label("Uploading to selected platforms...");
+                }
+                AppState::Done(results) => {
+                    let results_clone = results.clone();
+                    self.render_results(ui, &results_clone);
+                    ui.add_space(8.0);
+                    if ui.button("New Upload").clicked() {
+                        self.state = AppState::Idle;
+                        self.progress.lock().unwrap().clear();
                     }
                 }
             });

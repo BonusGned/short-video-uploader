@@ -7,11 +7,12 @@ pub struct KeyringStore;
 
 impl KeyringStore {
     pub fn store_token(platform: Platform, token: &str) -> Result<()> {
-        let entry = keyring::Entry::new(SERVICE_NAME, &platform.to_string())
-            .map_err(|e| CoreError::Auth {
+        let entry = keyring::Entry::new(SERVICE_NAME, &platform.to_string()).map_err(|e| {
+            CoreError::Auth {
                 platform,
                 reason: e.to_string(),
-            })?;
+            }
+        })?;
 
         entry.set_password(token).map_err(|e| CoreError::Auth {
             platform,
@@ -20,11 +21,12 @@ impl KeyringStore {
     }
 
     pub fn get_token(platform: Platform) -> Result<Option<String>> {
-        let entry = keyring::Entry::new(SERVICE_NAME, &platform.to_string())
-            .map_err(|e| CoreError::Auth {
+        let entry = keyring::Entry::new(SERVICE_NAME, &platform.to_string()).map_err(|e| {
+            CoreError::Auth {
                 platform,
                 reason: e.to_string(),
-            })?;
+            }
+        })?;
 
         match entry.get_password() {
             Ok(token) => Ok(Some(token)),
@@ -37,11 +39,12 @@ impl KeyringStore {
     }
 
     pub fn delete_token(platform: Platform) -> Result<()> {
-        let entry = keyring::Entry::new(SERVICE_NAME, &platform.to_string())
-            .map_err(|e| CoreError::Auth {
+        let entry = keyring::Entry::new(SERVICE_NAME, &platform.to_string()).map_err(|e| {
+            CoreError::Auth {
                 platform,
                 reason: e.to_string(),
-            })?;
+            }
+        })?;
 
         match entry.delete_credential() {
             Ok(()) => Ok(()),

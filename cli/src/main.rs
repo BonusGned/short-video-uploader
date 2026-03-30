@@ -43,7 +43,12 @@ enum Commands {
         #[arg(short, long)]
         video: String,
 
-        #[arg(short, long, value_delimiter = ',', default_value = "youtube,instagram,tiktok,vk")]
+        #[arg(
+            short,
+            long,
+            value_delimiter = ',',
+            default_value = "youtube,instagram,tiktok,vk"
+        )]
         platforms: Vec<PlatformArg>,
     },
     Auth {
@@ -255,7 +260,9 @@ async fn handle_auth(action: AuthAction) -> Result<()> {
             let uploader = uploaders
                 .iter()
                 .find(|u| u.platform() == plat)
-                .ok_or_else(|| anyhow::anyhow!("{plat} not configured. Add credentials to config first."))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!("{plat} not configured. Add credentials to config first.")
+                })?;
 
             println!("Opening browser for {plat} authorization...");
             uploader.authenticate().await?;
@@ -291,12 +298,43 @@ fn handle_config(action: ConfigAction) -> Result<()> {
             println!("Theme: {}", config.theme);
             println!("Enabled platforms: {:?}", config.enabled_platforms);
             println!();
-            println!("YouTube: {}", if config.youtube.is_configured() { "configured" } else { "not configured" });
-            println!("TikTok: {}", if config.tiktok.is_configured() { "configured" } else { "not configured" });
-            println!("Instagram: {}", if config.instagram.is_configured() { "configured" } else { "not configured" });
-            println!("VK: {}", if config.vk.is_configured() { "configured" } else { "not configured" });
+            println!(
+                "YouTube: {}",
+                if config.youtube.is_configured() {
+                    "configured"
+                } else {
+                    "not configured"
+                }
+            );
+            println!(
+                "TikTok: {}",
+                if config.tiktok.is_configured() {
+                    "configured"
+                } else {
+                    "not configured"
+                }
+            );
+            println!(
+                "Instagram: {}",
+                if config.instagram.is_configured() {
+                    "configured"
+                } else {
+                    "not configured"
+                }
+            );
+            println!(
+                "VK: {}",
+                if config.vk.is_configured() {
+                    "configured"
+                } else {
+                    "not configured"
+                }
+            );
             println!();
-            println!("Config path: {}", config_manager.config_file_path().display());
+            println!(
+                "Config path: {}",
+                config_manager.config_file_path().display()
+            );
         }
         ConfigAction::SetTheme { theme } => {
             let pref = match theme {

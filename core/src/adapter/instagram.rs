@@ -70,7 +70,8 @@ impl InstagramUploader {
         params.insert("access_token", token.access_token.clone());
 
         let url = format!("{GRAPH_API}/{}/media", self.ig_user_id);
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .form(&params)
             .send()
@@ -109,10 +110,15 @@ impl InstagramUploader {
         for _ in 0..30 {
             tokio::time::sleep(Duration::from_secs(2)).await;
 
-            let resp = self.client.get(&url).send().await.map_err(|e| CoreError::Upload {
-                platform: Platform::Instagram,
-                reason: format!("Status check failed: {e}"),
-            })?;
+            let resp = self
+                .client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| CoreError::Upload {
+                    platform: Platform::Instagram,
+                    reason: format!("Status check failed: {e}"),
+                })?;
 
             let body = resp.text().await.unwrap_or_default();
             let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
@@ -135,11 +141,7 @@ impl InstagramUploader {
         })
     }
 
-    async fn publish_container(
-        &self,
-        token: &OAuthToken,
-        container_id: &str,
-    ) -> Result<String> {
+    async fn publish_container(&self, token: &OAuthToken, container_id: &str) -> Result<String> {
         let url = format!("{GRAPH_API}/{}/media_publish", self.ig_user_id);
 
         let params = [
@@ -147,7 +149,8 @@ impl InstagramUploader {
             ("access_token", &token.access_token),
         ];
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .form(&params)
             .send()
