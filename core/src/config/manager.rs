@@ -88,8 +88,10 @@ mod tests {
     fn loads_existing_config() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
-        let mut config = AppConfig::default();
-        config.theme = ThemePreference::Dark;
+        let config = AppConfig {
+            theme: ThemePreference::Dark,
+            ..Default::default()
+        };
         let content = toml::to_string_pretty(&config).unwrap();
         fs::write(&config_path, content).unwrap();
 
