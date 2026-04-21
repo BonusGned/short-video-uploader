@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use reqwest::header::AUTHORIZATION;
 
 use crate::adapter::oauth::{self, OAuthConfig, OAuthToken, ensure_valid_token, perform_full_auth};
 use crate::domain::model::{Platform, UploadResult, VideoMetadata};
@@ -13,6 +14,9 @@ const FB_AUTH_URL: &str = "https://www.facebook.com/v21.0/dialog/oauth";
 const FB_TOKEN_URL: &str = "https://graph.facebook.com/v21.0/oauth/access_token";
 const GRAPH_API: &str = "https://graph.facebook.com/v21.0";
 const REDIRECT_PORT: u16 = 8587;
+
+const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const STATUS_POLL_MAX_ATTEMPTS: usize = 60;
 
 pub struct InstagramUploader {
     oauth_config: OAuthConfig,
@@ -52,128 +56,179 @@ impl InstagramUploader {
         }
     }
 
-    async fn get_token(&self) -> Result<OAuthToken> {
-        ensure_valid_token(&self.oauth_config).await
+    fn bearer(token: &OAuthToken) -> String {
+        format!("Bearer {}", token.access_token)
     }
 
-    async fn create_container(
+    async fn create_resumable_container(
         &self,
         token: &OAuthToken,
         metadata: &VideoMetadata,
-    ) -> Result<String> {
-        let video_url = format!("file://{}", metadata.video_path.display());
-
-        let mut params = HashMap::new();
-        params.insert("media_type", "REELS".to_string());
-        params.insert("video_url", video_url);
-        params.insert("caption", metadata.description.clone());
-        params.insert("access_token", token.access_token.clone());
-
+    ) -> Result<ResumableSession> {
         let url = format!("{GRAPH_API}/{}/media", self.ig_user_id);
-        let resp = self
-            .client
-            .post(&url)
-            .form(&params)
-            .send()
-            .await
-            .map_err(|e| CoreError::Upload {
-                platform: Platform::Instagram,
-                reason: format!("Container creation failed: {e}"),
-            })?;
-
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-
-        if !status.is_success() {
-            return Err(CoreError::Upload {
-                platform: Platform::Instagram,
-                reason: format!("Container creation returned {status}: {body}"),
-            });
-        }
-
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-        json["id"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| CoreError::Upload {
-                platform: Platform::Instagram,
-                reason: "No container ID in response".into(),
-            })
-    }
-
-    async fn wait_for_container(&self, token: &OAuthToken, container_id: &str) -> Result<()> {
-        let url = format!(
-            "{GRAPH_API}/{container_id}?fields=status_code&access_token={}",
-            token.access_token
-        );
-
-        for _ in 0..30 {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-
-            let resp = self
-                .client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| CoreError::Upload {
-                    platform: Platform::Instagram,
-                    reason: format!("Status check failed: {e}"),
-                })?;
-
-            let body = resp.text().await.unwrap_or_default();
-            let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-
-            match json["status_code"].as_str() {
-                Some("FINISHED") => return Ok(()),
-                Some("ERROR") => {
-                    return Err(CoreError::Upload {
-                        platform: Platform::Instagram,
-                        reason: "Container processing failed".into(),
-                    });
-                }
-                _ => continue,
-            }
-        }
-
-        Err(CoreError::Upload {
-            platform: Platform::Instagram,
-            reason: "Container processing timed out".into(),
-        })
-    }
-
-    async fn publish_container(&self, token: &OAuthToken, container_id: &str) -> Result<String> {
-        let url = format!("{GRAPH_API}/{}/media_publish", self.ig_user_id);
-
         let params = [
-            ("creation_id", container_id),
-            ("access_token", &token.access_token),
+            ("media_type", "REELS"),
+            ("upload_type", "resumable"),
+            ("caption", metadata.description.as_str()),
         ];
 
         let resp = self
             .client
             .post(&url)
+            .header(AUTHORIZATION, Self::bearer(token))
             .form(&params)
             .send()
             .await
-            .map_err(|e| CoreError::Upload {
-                platform: Platform::Instagram,
-                reason: format!("Publish failed: {e}"),
-            })?;
+            .map_err(|e| upload_err(format!("Container creation failed: {e}")))?;
 
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-
+        let (status, body) = read_response(resp).await;
         if !status.is_success() {
-            return Err(CoreError::Upload {
-                platform: Platform::Instagram,
-                reason: format!("Publish returned {status}: {body}"),
-            });
+            return Err(upload_err(format!(
+                "Container creation returned {status}: {body}"
+            )));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-        let media_id = json["id"].as_str().unwrap_or("unknown");
+        let json = parse_json(&body)?;
+        let id = json["id"]
+            .as_str()
+            .ok_or_else(|| upload_err(format!("No container id in response: {body}")))?
+            .to_string();
+        let uri = json["uri"]
+            .as_str()
+            .ok_or_else(|| upload_err(format!("No upload uri in response: {body}")))?
+            .to_string();
+
+        Ok(ResumableSession { id, uri })
+    }
+
+    async fn upload_video_bytes(
+        &self,
+        token: &OAuthToken,
+        session: &ResumableSession,
+        metadata: &VideoMetadata,
+        on_progress: &ProgressCallback,
+    ) -> Result<()> {
+        let bytes = tokio::fs::read(&metadata.video_path)
+            .await
+            .map_err(|e| upload_err(format!("Cannot read video: {e}")))?;
+
+        let total_bytes = bytes.len() as u64;
+        if total_bytes == 0 {
+            return Err(upload_err("Video file is empty"));
+        }
+
+        on_progress(UploadProgress {
+            bytes_sent: 0,
+            total_bytes,
+        });
+
+        let resp = self
+            .client
+            .post(&session.uri)
+            .header(AUTHORIZATION, format!("OAuth {}", token.access_token))
+            .header("offset", "0")
+            .header("file_size", total_bytes.to_string())
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|e| upload_err(format!("Video upload failed: {e}")))?;
+
+        let (status, body) = read_response(resp).await;
+        if !status.is_success() {
+            return Err(upload_err(format!("Video upload returned {status}: {body}")));
+        }
+
+        on_progress(UploadProgress {
+            bytes_sent: total_bytes,
+            total_bytes,
+        });
+        Ok(())
+    }
+
+    async fn wait_for_container(&self, token: &OAuthToken, container_id: &str) -> Result<()> {
+        let url = format!("{GRAPH_API}/{container_id}?fields=status_code");
+        let bearer = Self::bearer(token);
+
+        for _ in 0..STATUS_POLL_MAX_ATTEMPTS {
+            let resp = self
+                .client
+                .get(&url)
+                .header(AUTHORIZATION, &bearer)
+                .send()
+                .await
+                .map_err(|e| upload_err(format!("Status check failed: {e}")))?;
+
+            let (status, body) = read_response(resp).await;
+            if !status.is_success() {
+                return Err(upload_err(format!("Status check returned {status}: {body}")));
+            }
+
+            let json = parse_json(&body)?;
+            match json["status_code"].as_str() {
+                Some("FINISHED") => return Ok(()),
+                Some("ERROR") | Some("EXPIRED") => {
+                    return Err(upload_err(format!(
+                        "Container {container_id} processing failed: {body}"
+                    )));
+                }
+                _ => {}
+            }
+
+            tokio::time::sleep(STATUS_POLL_INTERVAL).await;
+        }
+
+        Err(upload_err(format!(
+            "Container {container_id} processing timed out after {}s",
+            STATUS_POLL_INTERVAL.as_secs() * STATUS_POLL_MAX_ATTEMPTS as u64
+        )))
+    }
+
+    async fn publish_container(&self, token: &OAuthToken, container_id: &str) -> Result<String> {
+        let url = format!("{GRAPH_API}/{}/media_publish", self.ig_user_id);
+        let params = [("creation_id", container_id)];
+
+        let resp = self
+            .client
+            .post(&url)
+            .header(AUTHORIZATION, Self::bearer(token))
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| upload_err(format!("Publish failed: {e}")))?;
+
+        let (status, body) = read_response(resp).await;
+        if !status.is_success() {
+            return Err(upload_err(format!("Publish returned {status}: {body}")));
+        }
+
+        let json = parse_json(&body)?;
+        let media_id = json["id"]
+            .as_str()
+            .ok_or_else(|| upload_err(format!("Missing media id in publish response: {body}")))?;
         Ok(format!("https://www.instagram.com/reel/{media_id}/"))
     }
+}
+
+struct ResumableSession {
+    id: String,
+    uri: String,
+}
+
+fn upload_err(reason: impl Into<String>) -> CoreError {
+    CoreError::Upload {
+        platform: Platform::Instagram,
+        reason: reason.into(),
+    }
+}
+
+fn parse_json(body: &str) -> Result<serde_json::Value> {
+    serde_json::from_str(body).map_err(|e| upload_err(format!("Invalid JSON response: {e}: {body}")))
+}
+
+async fn read_response(resp: reqwest::Response) -> (reqwest::StatusCode, String) {
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    (status, body)
 }
 
 #[async_trait]
@@ -193,37 +248,13 @@ impl AsyncUploader for InstagramUploader {
         metadata: &VideoMetadata,
         on_progress: ProgressCallback,
     ) -> Result<UploadResult> {
-        let token = self.get_token().await?;
-        let total_bytes = tokio::fs::metadata(&metadata.video_path)
-            .await
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let token = ensure_valid_token(&self.oauth_config).await?;
 
-        on_progress(UploadProgress {
-            bytes_sent: 0,
-            total_bytes,
-        });
-
-        let container_id = self.create_container(&token, metadata).await?;
-
-        on_progress(UploadProgress {
-            bytes_sent: total_bytes / 3,
-            total_bytes,
-        });
-
-        self.wait_for_container(&token, &container_id).await?;
-
-        on_progress(UploadProgress {
-            bytes_sent: total_bytes * 2 / 3,
-            total_bytes,
-        });
-
-        let url = self.publish_container(&token, &container_id).await?;
-
-        on_progress(UploadProgress {
-            bytes_sent: total_bytes,
-            total_bytes,
-        });
+        let session = self.create_resumable_container(&token, metadata).await?;
+        self.upload_video_bytes(&token, &session, metadata, &on_progress)
+            .await?;
+        self.wait_for_container(&token, &session.id).await?;
+        let url = self.publish_container(&token, &session.id).await?;
 
         Ok(UploadResult::success(Platform::Instagram, url))
     }
