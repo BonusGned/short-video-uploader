@@ -2,11 +2,5 @@
 pre-build = [
     "dpkg --add-architecture $CROSS_DEB_ARCH",
     "apt-get update",
-    "apt-get install --assume-yes --no-install-recommends pkg-config libssl-dev:$CROSS_DEB_ARCH libdbus-1-dev:$CROSS_DEB_ARCH libsecret-1-dev:$CROSS_DEB_ARCH libxcb-render0-dev:$CROSS_DEB_ARCH libxcb-shape0-dev:$CROSS_DEB_ARCH libxcb-xfixes0-dev:$CROSS_DEB_ARCH libxkbcommon-dev:$CROSS_DEB_ARCH",
-]
-
-[target.aarch64-unknown-linux-gnu.env]
-passthrough = [
-    "PKG_CONFIG_ALLOW_CROSS",
-    "PKG_CONFIG_SYSROOT_DIR",
+    "apt-get install --assume-yes --no-install-recommends pkg-config libxcb-render0-dev:$CROSS_DEB_ARCH libxcb-shape0-dev:$CROSS_DEB_ARCH libxcb-xfixes0-dev:$CROSS_DEB_ARCH libxkbcommon-dev:$CROSS_DEB_ARCH",
 ]

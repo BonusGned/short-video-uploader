@@ -71,21 +71,25 @@ pub fn setup_style(ctx: &egui::Context) {
     style.spacing.icon_spacing = 6.0;
     style.spacing.window_margin = Margin::same(14);
 
-    style
-        .text_styles
-        .insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
+    style.text_styles.insert(
+        TextStyle::Heading,
+        FontId::new(22.0, FontFamily::Proportional),
+    );
     style
         .text_styles
         .insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
-    style
-        .text_styles
-        .insert(TextStyle::Button, FontId::new(14.0, FontFamily::Proportional));
-    style
-        .text_styles
-        .insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
-    style
-        .text_styles
-        .insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
+    style.text_styles.insert(
+        TextStyle::Button,
+        FontId::new(14.0, FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        TextStyle::Small,
+        FontId::new(12.0, FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        TextStyle::Monospace,
+        FontId::new(13.0, FontFamily::Monospace),
+    );
 
     ctx.set_style(style);
 }

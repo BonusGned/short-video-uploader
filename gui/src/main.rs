@@ -179,10 +179,9 @@ impl CrossPostApp {
                     ThemePreference::Dark => "Dark",
                     ThemePreference::System => "System",
                 };
-                let btn = egui::Button::new(
-                    egui::RichText::new(format!("{icon}  {label}")).size(13.0),
-                )
-                .min_size(egui::vec2(96.0, 30.0));
+                let btn =
+                    egui::Button::new(egui::RichText::new(format!("{icon}  {label}")).size(13.0))
+                        .min_size(egui::vec2(96.0, 30.0));
                 if ui.add(btn).clicked() {
                     let next = match current {
                         ThemePreference::Light => ThemePreference::Dark,
@@ -263,14 +262,11 @@ impl CrossPostApp {
                     .map(|p| truncate_path(&p.display().to_string(), 60))
                     .unwrap_or_else(|| "No file selected".into());
                 let has_file = self.form.video_path.is_some();
-                ui.label(
-                    egui::RichText::new(display)
-                        .color(if has_file {
-                            ui.visuals().text_color()
-                        } else {
-                            theme::MUTED
-                        }),
-                );
+                ui.label(egui::RichText::new(display).color(if has_file {
+                    ui.visuals().text_color()
+                } else {
+                    theme::MUTED
+                }));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Browse\u{2026}").clicked()
                         && let Some(path) = rfd::FileDialog::new()
@@ -300,14 +296,11 @@ impl CrossPostApp {
                     .map(|p| truncate_path(&p.display().to_string(), 60))
                     .unwrap_or_else(|| "No thumbnail".into());
                 let has_thumb = self.form.thumbnail_path.is_some();
-                ui.label(
-                    egui::RichText::new(display)
-                        .color(if has_thumb {
-                            ui.visuals().text_color()
-                        } else {
-                            theme::MUTED
-                        }),
-                );
+                ui.label(egui::RichText::new(display).color(if has_thumb {
+                    ui.visuals().text_color()
+                } else {
+                    theme::MUTED
+                }));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Browse\u{2026}").clicked()
                         && let Some(path) = rfd::FileDialog::new()
@@ -449,7 +442,11 @@ impl CrossPostApp {
         }
         theme::card_frame(ui.ctx()).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("\u{26A0}").color(theme::DANGER).size(15.0));
+                ui.label(
+                    egui::RichText::new("\u{26A0}")
+                        .color(theme::DANGER)
+                        .size(15.0),
+                );
                 ui.label(
                     egui::RichText::new("Please fix the following")
                         .strong()
@@ -574,7 +571,10 @@ impl CrossPostApp {
             let label = if selected_count == 0 {
                 "Upload".to_string()
             } else {
-                format!("\u{21E7}  Upload to {selected_count} platform{}", if selected_count == 1 { "" } else { "s" })
+                format!(
+                    "\u{21E7}  Upload to {selected_count} platform{}",
+                    if selected_count == 1 { "" } else { "s" }
+                )
             };
             if ui
                 .add_enabled(can_upload, theme::primary_button(&label))
@@ -593,8 +593,7 @@ impl CrossPostApp {
             ui.spinner();
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("Uploading to selected platforms\u{2026}")
-                    .color(theme::MUTED),
+                egui::RichText::new("Uploading to selected platforms\u{2026}").color(theme::MUTED),
             );
         });
     }
@@ -603,7 +602,10 @@ impl CrossPostApp {
         self.render_results(ui, results);
         ui.add_space(18.0);
         ui.vertical_centered(|ui| {
-            if ui.add(theme::primary_button("\u{21BB}  New upload")).clicked() {
+            if ui
+                .add(theme::primary_button("\u{21BB}  New upload"))
+                .clicked()
+            {
                 self.state = AppState::Idle;
                 self.progress.lock().unwrap().clear();
             }

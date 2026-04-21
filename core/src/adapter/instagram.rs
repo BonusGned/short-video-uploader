@@ -135,7 +135,9 @@ impl InstagramUploader {
 
         let (status, body) = read_response(resp).await;
         if !status.is_success() {
-            return Err(upload_err(format!("Video upload returned {status}: {body}")));
+            return Err(upload_err(format!(
+                "Video upload returned {status}: {body}"
+            )));
         }
 
         on_progress(UploadProgress {
@@ -160,7 +162,9 @@ impl InstagramUploader {
 
             let (status, body) = read_response(resp).await;
             if !status.is_success() {
-                return Err(upload_err(format!("Status check returned {status}: {body}")));
+                return Err(upload_err(format!(
+                    "Status check returned {status}: {body}"
+                )));
             }
 
             let json = parse_json(&body)?;
@@ -222,7 +226,8 @@ fn upload_err(reason: impl Into<String>) -> CoreError {
 }
 
 fn parse_json(body: &str) -> Result<serde_json::Value> {
-    serde_json::from_str(body).map_err(|e| upload_err(format!("Invalid JSON response: {e}: {body}")))
+    serde_json::from_str(body)
+        .map_err(|e| upload_err(format!("Invalid JSON response: {e}: {body}")))
 }
 
 async fn read_response(resp: reqwest::Response) -> (reqwest::StatusCode, String) {
