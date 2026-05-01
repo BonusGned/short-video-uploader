@@ -1,3 +1,4 @@
+mod auth_dialog;
 mod theme;
 
 use std::collections::HashMap;
@@ -14,6 +15,8 @@ use crosspost_core::domain::model::{
 use crosspost_core::domain::port::{AsyncUploader, UploadProgress};
 use crosspost_core::service::upload_orchestrator::UploadOrchestrator;
 use crosspost_core::validation::VideoValidator;
+
+use auth_dialog::{AuthDialog, DialogAction};
 
 #[derive(Default, Clone)]
 struct UploadForm {
@@ -87,6 +90,7 @@ struct CrossPostApp {
     validation_errors: Vec<String>,
     runtime: tokio::runtime::Runtime,
     auth_status: HashMap<Platform, AuthState>,
+    auth_dialog: AuthDialog,
 }
 
 #[derive(Clone, PartialEq)]
@@ -118,6 +122,7 @@ impl CrossPostApp {
             validation_errors: Vec::new(),
             runtime,
             auth_status,
+            auth_dialog: AuthDialog::default(),
         }
     }
 
@@ -232,7 +237,17 @@ impl CrossPostApp {
                                     self.start_auth(platform, ui.ctx());
                                 }
                             }
-                            AuthState::NotConfigured => {}
+                            AuthState::NotConfigured => {
+                                if matches!(platform, Platform::YouTube | Platform::VK)
+                                    && ui.add(theme::secondary_button("Configure")).clicked()
+                                {
+                                    let existing = current_credentials(
+                                        self.config_manager.config(),
+                                        platform,
+                                    );
+                                    self.auth_dialog.open(platform, existing);
+                                }
+                            }
                         }
 
                         let (color, label) = match state {
@@ -460,6 +475,21 @@ impl CrossPostApp {
         });
     }
 
+    fn save_credentials(&mut self, platform: Platform, client_id: String, client_secret: String) {
+        let _ = self.config_manager.update(|c| match platform {
+            Platform::YouTube => {
+                c.youtube.client_id = client_id;
+                c.youtube.client_secret = client_secret;
+            }
+            Platform::VK => {
+                c.vk.client_id = client_id;
+                c.vk.client_secret = client_secret;
+            }
+            _ => {}
+        });
+        self.refresh_auth_status();
+    }
+
     fn start_auth(&mut self, platform: Platform, ctx: &egui::Context) {
         let uploaders = adapter::create_uploaders(self.config_manager.config());
         let uploader = uploaders.into_iter().find(|u| u.platform() == platform);
@@ -660,9 +690,35 @@ impl eframe::App for CrossPostApp {
             });
         });
 
+        match self.auth_dialog.show(ctx) {
+            DialogAction::SaveAndLogin {
+                platform,
+                client_id,
+                client_secret,
+            } => {
+                self.save_credentials(platform, client_id, client_secret);
+                self.start_auth(platform, ctx);
+            }
+            DialogAction::None => {}
+        }
+
         if matches!(self.state, AppState::Uploading) {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
+    }
+}
+
+fn current_credentials(
+    config: &crosspost_core::config::AppConfig,
+    platform: Platform,
+) -> (String, String) {
+    match platform {
+        Platform::YouTube => (
+            config.youtube.client_id.clone(),
+            config.youtube.client_secret.clone(),
+        ),
+        Platform::VK => (config.vk.client_id.clone(), config.vk.client_secret.clone()),
+        _ => (String::new(), String::new()),
     }
 }
 

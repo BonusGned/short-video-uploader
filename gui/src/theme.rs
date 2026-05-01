@@ -166,6 +166,13 @@ pub fn primary_button(text: &str) -> egui::Button<'static> {
     .min_size(Vec2::new(220.0, 42.0))
 }
 
+pub fn secondary_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(text).size(13.0).strong().color(ACCENT_HOVER))
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, ACCENT_HOVER))
+        .corner_radius(CornerRadius::same(WIDGET_RADIUS))
+}
+
 trait ColorIntensity {
     fn intensity(&self) -> f32;
 }
